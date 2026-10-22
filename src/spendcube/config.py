@@ -46,6 +46,15 @@ CIDA_PROJECTS_DIR = Path(get("CIDA_PROJECTS_DIR", str(_SHAREPOINT / "CIDA Projec
 # docs/data_dictionary.md. Name the specific folder; never point at a whole library. Examples:
 #   SAP_PA0001_DIR = AUTOMATION_DIR / "SAP-PA0001"
 #   PROJECT_DATA_DIR = CIDA_PROJECTS_DIR / "<area>" / "<project folder>" / "Data"
+GL_EXPORT_FILE = AUTOMATION_DIR / "SAP-GL_Export" / "GL_EXPORT.XLSX"
+SUPPLIER_DIR = AUTOMATION_DIR / "Output-Supplier List-S&P Version"
+DISBURSEMENT_DIR = AUTOMATION_DIR / "SAP HANA-ZPU_CP05 - Disbursements"
+BOA_PCARD_DIR = AUTOMATION_DIR / "BOA_PCARD-SpendViz"
+CONCUR_ENTRIES_DIR = AUTOMATION_DIR / "Concur-Spendcube-Entries"
+CONCUR_ALLOCATIONS_DIR = AUTOMATION_DIR / "Concur-SpendcubeEntriesAllocations"
+ARIBA_INVOICE_DIR = AUTOMATION_DIR / "Ariba-InvoceDetailsWDescription"
+ARIBA_PO_DIR = AUTOMATION_DIR / "Ariba-Purchase Order Details"
+ML_MODEL_FILE = AUTOMATION_DIR / "Python-AutomationEXEs" / "Spendcube_Algorithm" / "SpendCube_ML.joblib"
 
 # SQL Server: one server and one login, shared with cida_toolkit monitoring (which reads the same
 # CIDA_SQL_* variables itself). Optional here so modules that don't touch SQL still import; code
