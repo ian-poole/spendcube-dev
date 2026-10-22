@@ -1,0 +1,460 @@
+{# MANAGED by the html-report skill (refreshed by init_reports.py --upgrade). Included by _base.html.
+   Adds reusable chart helpers to window.Report. Documented in reports/README.md. #}
+{% raw %}
+<script>
+(function () {
+  "use strict";
+  var R = window.Report;
+  if (!R) throw new Error("chart helpers must load after the Report object (see _base.html)");
+
+  // ---------------------------------------------------------------- small utilities
+  function cssVar(name, fallback) {
+    var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+  }
+  function isObj(v) { return v && typeof v === "object" && !Array.isArray(v); }
+  function merge(target, src) {           // deep merge of plain objects; arrays/functions replace
+    Object.keys(src || {}).forEach(function (k) {
+      if (isObj(src[k]) && isObj(target[k])) merge(target[k], src[k]);
+      else if (isObj(src[k])) target[k] = merge({}, src[k]);
+      else target[k] = src[k];
+    });
+    return target;
+  }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function sum(a) { return a.reduce(function (s, v) { return s + v; }, 0); }
+  function family() { return Chart.defaults.font.family; }
+
+  // 1234 -> "1,234"; 5700 -> "5.7K" (compact). Use for labels.
+  R.format = {
+    int: function (n) { return Math.round(n).toLocaleString("en-US"); },
+    compact: function (n) {
+      var a = Math.abs(n);
+      if (a >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+      if (a >= 1e3) return (n / 1e3).toFixed(1) + "K";
+      return String(Math.round(n));
+    }
+  };
+
+  // ---------------------------------------------------------------- static chart defaults
+  // Chart options for the Metrics view: static (no hover/tooltips), no built-in legend (use the
+  // metrics_chart macro's legend), and a little headroom above the bars for labels.
+  R.metricsOptions = function (overrides) {
+    return merge({
+      responsive: true, maintainAspectRatio: false, animation: { duration: 400 },
+      events: [],
+      layout: { autoPadding: false, padding: { top: 26, right: 4, bottom: 4, left: 4 } },
+      plugins: { legend: { display: false }, tooltip: { enabled: false } }
+    }, overrides);
+  };
+
+  // ---------------------------------------------------------------- y-axis tick marks
+  // Thin black tick marks on a left y axis, a fixed gap after each value label, none at zero.
+  //   var yt = Report.yTicks({ gap: 1, length: 6 });
+  //   options.scales.y = yt.scale({ ticks: { callback: fmt } });   plugins: [yt.plugin]
+  // Built-in tick length is switched off (it would add ~8px of unwanted space after the labels).
+  R.yTicks = function (o) {
+    o = o || {};
+    var pad = o.padding == null ? 10 : o.padding;     // label's distance from the plot area
+    var gap = o.gap == null ? 1 : o.gap;              // label -> tick distance
+    var len = o.length == null ? 6 : o.length;
+    var color = o.color || "#000", width = o.width || 1;
+    var id = o.scaleId || "y", skipZero = o.skipZero !== false;
+    return {
+      scale: function (overrides) {
+        return merge({
+          position: "left", grid: { display: false, drawTicks: false }, border: { display: false },
+          ticks: { padding: pad, font: { size: 12 } }
+        }, overrides);
+      },
+      plugin: {
+        id: "reportYTicks_" + id,
+        afterDraw: function (chart) {
+          var s = chart.scales[id];
+          if (!s) return;
+          var ctx = chart.ctx, x1 = chart.chartArea.left - pad + gap;
+          ctx.save();
+          ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath();
+          s.ticks.forEach(function (t) {
+            if (skipZero && t.value === 0) return;
+            var py = Math.round(s.getPixelForValue(t.value)) + 0.5;
+            ctx.moveTo(x1, py); ctx.lineTo(x1 + len, py);
+          });
+          ctx.stroke(); ctx.restore();
+        }
+      }
+    };
+  };
+
+  // ---------------------------------------------------------------- hierarchical x axis
+  // Show only the lowest category's labels on the axis; each higher level is drawn below as a
+  // bracket spanning its members with one label, and optional extra info lines above the bracket.
+  //   var ax = Report.hierarchicalAxis({ levels: [
+  //     { keys: rows.map(r => r.fy),                  // one key per bar; consecutive equal keys group
+  //       label: k => "FY" + String(k).slice(2),      // bracket label
+  //       info:  k => ["Avg Headcount", "4,550"] },   // optional lines above the bracket (string|array)
+  //     { keys: rows.map(r => r.decade), label: k => k }   // further levels stack downward
+  //   ]});
+  //   data.labels = rows.map(r => r.q);   options.scales.x = ax.scale();   plugins: [ax.plugin]
+  // Levels are listed from the one nearest the axis outward. Text is kept inside the canvas.
+  // Optional per level: below: (key) => string|array of small lines under the bracket label (for example
+  // "Q1 only"). Optional on the config: hideTicks: true hides the normal category labels (use it when the
+  // bracket label is the only label, one point per group); labelFont: "14px" (default "600 12px").
+  R.hierarchicalAxis = function (cfg) {
+    var INFO_LH = 13, TOP = 6, INFO_GAP = 6, BRACKET_GAP = 4, LABEL_GAP = 5, LABEL_H = 14, BOTTOM = 6, BELOW_GAP = 6;
+    var sid = cfg.scaleId || "x";
+    var n = 0;
+    var levels = (cfg.levels || []).map(function (lv) {
+      n = lv.keys.length;
+      var groups = [];
+      lv.keys.forEach(function (k, i) {
+        var g = groups[groups.length - 1];
+        if (g && g.key === k) g.last = i; else groups.push({ key: k, first: i, last: i });
+      });
+      groups.forEach(function (g) {
+        g.label = lv.label ? String(lv.label(g.key, g)) : String(g.key);
+        var info = lv.info ? lv.info(g.key, g) : null;
+        g.info = info == null ? [] : (Array.isArray(info) ? info.map(String) : String(info).split("\n"));
+        var below = lv.below ? lv.below(g.key, g) : null;
+        g.below = below == null ? [] : (Array.isArray(below) ? below.map(String) : String(below).split("\n"));
+      });
+      var belowLines = Math.max.apply(null, [0].concat(groups.map(function (g) { return g.below.length; })));
+      var lines = Math.max.apply(null, [0].concat(groups.map(function (g) { return g.info.length; })));
+      var yLine = TOP + lines * INFO_LH + (lines ? INFO_GAP : 0) + BRACKET_GAP;
+      return { groups: groups, lines: lines, yLine: yLine,
+               height: yLine + LABEL_GAP + LABEL_H + (belowLines ? BELOW_GAP + belowLines * INFO_LH : 0) + BOTTOM };
+    });
+    var extra = sum(levels.map(function (l) { return l.height; }));
+    return {
+      scale: function (overrides) {
+        return merge({
+          grid: { display: false },
+          ticks: { autoSkip: false, maxRotation: 0, display: !cfg.hideTicks },
+          afterFit: function (s) { s._reportBase = s.height; s.height += extra; }   // room for the levels
+        }, overrides);
+      },
+      plugin: {
+        id: "reportHierarchicalAxis_" + sid,
+        afterDraw: function (chart) {
+          var x = chart.scales[sid];
+          if (!x || !n) return;
+          var ctx = chart.ctx, cat = x.width / n;
+          var colors = cfg.colors || {};
+          var cLabel = colors.label || cssVar("--text", "#222");
+          var cInfo = colors.info || cssVar("--muted", "#666");
+          var cLine = colors.line || cssVar("--muted", "#999");
+          var fInfo = "11px " + family(), fLabel = (cfg.labelFont || "600 12px") + " " + family();
+          var y = x.top + (x._reportBase == null ? x.height : x._reportBase);
+          ctx.save();
+          ctx.textAlign = "center"; ctx.textBaseline = "top";
+          levels.forEach(function (lv) {
+            var yLine = y + lv.yLine;
+            lv.groups.forEach(function (g) {
+              var l = x.getPixelForValue(g.first) - cat / 2 + 3, r = x.getPixelForValue(g.last) + cat / 2 - 3;
+              var mid = (l + r) / 2, w = 0;
+              ctx.font = fInfo;
+              g.info.concat(g.below).forEach(function (t) { w = Math.max(w, ctx.measureText(t).width); });
+              ctx.font = fLabel; w = Math.max(w, ctx.measureText(g.label).width);
+              var tx = clamp(mid, w / 2 + 2, chart.width - w / 2 - 2);      // never cut off at the edges
+              ctx.font = fInfo; ctx.fillStyle = cInfo;
+              g.info.forEach(function (t, i) { ctx.fillText(t, tx, y + TOP + i * INFO_LH); });
+              ctx.strokeStyle = cLine; ctx.lineWidth = 1; ctx.beginPath();
+              ctx.moveTo(l, yLine - 4); ctx.lineTo(l, yLine); ctx.lineTo(r, yLine); ctx.lineTo(r, yLine - 4);
+              ctx.stroke();
+              ctx.font = fLabel; ctx.fillStyle = cLabel;
+              ctx.fillText(g.label, tx, yLine + LABEL_GAP);
+              ctx.font = fInfo; ctx.fillStyle = cInfo;
+              g.below.forEach(function (t, i) { ctx.fillText(t, tx, yLine + LABEL_GAP + LABEL_H + BELOW_GAP + i * INFO_LH); });
+            });
+            y += lv.height;
+          });
+          ctx.restore();
+        }
+      }
+    };
+  };
+
+  // ---------------------------------------------------------------- period x axis
+  // One category per period (for example a fiscal year). Brackets are only drawn when they carry data: when
+  // any period has `info` lines (shown above its bracket, e.g. ["Internal Mobility", "152"]), every period
+  // gets a bracket (Report.hierarchicalAxis) with its `below` notes under the label. Otherwise the axis has
+  // plain labels and no brackets, and a period's `below` notes become extra label lines (e.g. "Q1 only").
+  //   var ax = Report.periodAxis([{ label: "FY26", info: ["Internal Mobility", "152"] },
+  //                               { label: "FY27", info: ["Internal Mobility", "66"], below: ["Q1 only"] }]);
+  //   data.labels = ax.labels;   options.scales.x = ax.scale({ offset: true });   plugins: [ax.plugin]
+  R.periodAxis = function (points, o) {
+    o = o || {};
+    var lines = function (v) { return v == null ? [] : (Array.isArray(v) ? v.map(String) : String(v).split("\n")); };
+    var bracketed = points.some(function (p) { return lines(p.info).length > 0; });
+    if (bracketed) {
+      var ax = R.hierarchicalAxis({
+        hideTicks: true, labelFont: o.labelFont || "14px", colors: o.colors || { label: "#000" },
+        levels: [{
+          keys: points.map(function (p, i) { return i; }),
+          label: function (k) { return points[k].label; },
+          info: function (k) { return lines(points[k].info); },
+          below: function (k) { return lines(points[k].below); }
+        }]
+      });
+      return { bracketed: true, labels: points.map(function (p) { return p.label; }), scale: ax.scale, plugin: ax.plugin };
+    }
+    return {
+      bracketed: false,
+      labels: points.map(function (p) { var b = lines(p.below); return b.length ? [p.label].concat(b) : p.label; }),
+      scale: function (overrides) {
+        return merge({ grid: { display: false, drawTicks: false },
+                       ticks: { autoSkip: false, maxRotation: 0, color: "#000", font: { size: 14 }, padding: 8 } }, overrides);
+      },
+      plugin: { id: "reportPeriodAxisPlain" }
+    };
+  };
+
+  // ---------------------------------------------------------------- segmented bars
+  // Fill a bar with stacked colour segments computed from the data (never invented).
+  //   var seg = Report.segmentedBars({
+  //     parts: i => rows[i].parts || null,         // numbers per bar, bottom to top; null = plain bar
+  //     mode: "percent",                           // "percent": parts are % of the bar (sum ~100)
+  //                                                // "total":   parts are absolute amounts that add up to the bar
+  //     segments: ["#bf7b68", "#7B68BF", "#68BF7B"] // colours, bottom to top (strings or {color})
+  //   });
+  //   dataset.backgroundColor = seg.fill;   plugins: [seg.plugin]
+  // Labels default to the share ("20%") in percent mode and the amount in total mode; set
+  // labels: "percent" | "value" | "none" to override. Plain bars use `fallback` (grey).
+  R.segmentedBars = function (cfg) {
+    var colors = (cfg.segments || []).map(function (s) { return typeof s === "string" ? s : s.color; });
+    var fallback = cfg.fallback || "#b3b3b3";
+    var sid = cfg.scaleId || "y", di = cfg.datasetIndex || 0;
+    var mode = cfg.mode === "total" ? "total" : "percent";
+    var labels = cfg.labels || (mode === "total" ? "value" : "percent");
+    var minH = cfg.minLabelHeight == null ? 12 : cfg.minLabelHeight;
+    var fmt = cfg.format || R.format.int;
+    function partsAt(i) {
+      var p = cfg.parts(i);
+      if (!p || !p.length) return null;
+      var t = sum(p);
+      return t > 0 ? { parts: p, total: t } : null;
+    }
+    return {
+      fill: function (ctx) {
+        var chart = ctx.chart, s = chart.scales[sid], p = partsAt(ctx.dataIndex);
+        if (!p || !s || !chart.chartArea || !ctx.parsed || ctx.parsed.y == null) return fallback;
+        var g = chart.ctx.createLinearGradient(0, s.getPixelForValue(0), 0, s.getPixelForValue(ctx.parsed.y));
+        var from = 0;
+        p.parts.forEach(function (v, j) {                       // hard colour stops at each boundary
+          var to = from + v / p.total, c = colors[j % colors.length];
+          g.addColorStop(clamp(from, 0, 1), c); g.addColorStop(clamp(to, 0, 1), c);
+          from = to;
+        });
+        return g;
+      },
+      plugin: {
+        id: "reportSegmentLabels",
+        afterDatasetsDraw: function (chart) {
+          var s = chart.scales[sid];
+          if (labels === "none" || !s || !chart.isDatasetVisible(di)) return;
+          var ctx = chart.ctx, y0 = s.getPixelForValue(0);
+          ctx.save();
+          ctx.font = "12px " + family(); ctx.fillStyle = cfg.labelColor || "#000";
+          ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          chart.getDatasetMeta(di).data.forEach(function (bar, i) {
+            var p = partsAt(i);
+            if (!p) return;
+            var h = y0 - bar.y, from = 0;
+            p.parts.forEach(function (v) {
+              var share = v / p.total;
+              if (h * share >= minH) {
+                ctx.fillText(labels === "value" ? fmt(v) : Math.round(share * 100) + "%", bar.x, y0 - h * (from + share / 2));
+              }
+              from += share;
+            });
+          });
+          ctx.restore();
+        }
+      }
+    };
+  };
+
+  // ---------------------------------------------------------------- bars and short dash markers
+  // Bar series: solid, slim bars with gaps, grey unless a colour (or a fill function, e.g.
+  // segmentedBars().fill) is given. Drawn behind marker series (order 2).
+  R.barDataset = function (o) {
+    return {
+      type: "bar", label: o.label, data: o.data, yAxisID: o.yAxisID || "y", order: o.order == null ? 2 : o.order,
+      backgroundColor: o.fill || o.color || "#b3b3b3", borderWidth: 0,
+      categoryPercentage: 1, barPercentage: o.barPercentage == null ? 0.6 : o.barPercentage
+    };
+  };
+
+  // A series drawn as a short horizontal dash over each bar (no connecting line). `size` is the
+  // dash width as a fraction of the bar width, so overlapping series can use different sizes.
+  // Pass the same barPercentage as the barDataset it sits on (both default to 0.6).
+  R.dashDataset = function (o) {
+    var size = o.size == null ? 0.5 : o.size, bp = o.barPercentage == null ? 0.6 : o.barPercentage;
+    function radius(ctx) {
+      var x = ctx.chart.scales.x, n = (ctx.chart.data.labels || []).length || 1;
+      return x ? (x.width / n) * bp * size / 2 : 4;
+    }
+    return {
+      type: "line", label: o.label, data: o.data, yAxisID: o.yAxisID || "y", order: o.order == null ? 1 : o.order,
+      showLine: false, borderColor: o.color, backgroundColor: o.color,
+      pointStyle: "line", pointBorderColor: o.color, pointBorderWidth: o.thickness || 3,
+      pointRadius: radius, pointHoverRadius: radius, clip: false
+    };
+  };
+
+  // ---------------------------------------------------------------- line series
+  // A line series (one point per category). Implements the in-progress rule: the segment leading
+  // into any point flagged as an incomplete period (typically the current fiscal year) is dotted
+  // instead of solid. Markers stay filled.
+  //   Report.lineDataset({ label, data, color,
+  //     partial: [false, false, false, true] })     // or a function i => bool
+  // Label the incomplete period on the axis too (for example "Q1 only").
+  R.lineDataset = function (o) {
+    var color = o.color, dotted = o.dotted || [0.1, 7];
+    var partial = Array.isArray(o.partial) ? function (i) { return !!o.partial[i]; } : (o.partial || function () { return false; });
+    return {
+      type: "line", label: o.label, data: o.data, yAxisID: o.yAxisID || "y", order: o.order == null ? 1 : o.order,
+      tension: 0, borderColor: color, backgroundColor: color, borderWidth: o.width || 2.5, borderCapStyle: "round",
+      pointRadius: o.pointRadius == null ? 4.5 : o.pointRadius, pointBorderWidth: 2, pointBorderColor: color,
+      pointBackgroundColor: color,
+      segment: { borderDash: function (ctx) { return partial(ctx.p1DataIndex) ? dotted : undefined; } }
+    };
+  };
+
+  // ---------------------------------------------------------------- clustered columns
+  // Columns side by side per category, one colour per series, with optional line series drawn on top.
+  // An in-progress period (partial[i], typically the current fiscal year) is the bar version of the dotted
+  // line rule: its columns get a light tint of the series colour (partialFill "tint", the default; "none"
+  // leaves them empty) and a dotted outline in the full colour. Lines use Report.lineDataset, so the segment
+  // into a partial period is dotted. Muted colours (Report.mutedPalette) are used when a series has none.
+  //   Report.clusteredBars("c1", {
+  //     labels: ["FY25", "FY26", ["FY27", "Q1 only"]],
+  //     series: [{ label: "Promotions", data: [29, 37, 16], color: "#6F8FAF" }, ...],
+  //     lines:  [{ label: "Internal Mobility", data: [133, 145, 62], color: "#1d2330" }],   // optional
+  //     points: [{ label: "FY25", info: ["Internal Mobility", "147"] }, ...],   // optional, instead of labels:
+  //                                                       // brackets with info lines (Report.periodAxis)
+  //     partial: [false, false, true],                    // or a function i => bool
+  //     partialFill: "tint",                              // "tint" (default) or "none"
+  //     y: { max: 80, step: 20, format: v => v.toLocaleString() }     // min defaults to 0
+  //   });
+  R.mutedPalette = ["#6F8FAF", "#D9A55B", "#8DB596", "#B48291", "#9A8C7A", "#7FA7B5"];
+  R.tint = function (hex, alpha) {
+    var n = parseInt(String(hex).replace("#", ""), 16);
+    return "rgba(" + (n >> 16 & 255) + "," + (n >> 8 & 255) + "," + (n & 255) + "," + alpha + ")";
+  };
+  R.clusteredBars = function (id, cfg) {
+    var partial = Array.isArray(cfg.partial) ? function (i) { return !!cfg.partial[i]; } : (cfg.partial || function () { return false; });
+    var fill = cfg.partialFill || "tint", alpha = cfg.tintAlpha == null ? 0.35 : cfg.tintAlpha;
+    var y = cfg.y || {}, yt = R.yTicks(cfg.ticks || {});
+    var ax = cfg.points ? R.periodAxis(cfg.points, { colors: cfg.colors }) : null;
+    var bars = cfg.series.map(function (s, k) {
+      var col = s.color || R.mutedPalette[k % R.mutedPalette.length];
+      return {
+        type: "bar", label: s.label, data: s.data, order: 2, borderWidth: 0, seriesColor: col,
+        backgroundColor: s.data.map(function (_, i) {
+          return partial(i) ? (fill === "none" ? "transparent" : R.tint(col, alpha)) : col;
+        }),
+        categoryPercentage: cfg.categoryPercentage || 0.7, barPercentage: cfg.barPercentage || 0.9
+      };
+    });
+    var lines = (cfg.lines || []).map(function (l) {
+      return R.lineDataset({ label: l.label, data: l.data, color: l.color || "#1d2330", partial: cfg.partial || [], order: 1 });
+    });
+    // Chart.js can't dash a bar's border, so the dotted outline is drawn here (following the bar's animation)
+    var outline = {
+      id: "reportPartialBars_" + id,
+      afterDatasetsDraw: function (chart) {
+        var ctx = chart.ctx;
+        chart.data.datasets.forEach(function (ds, k) {
+          if (ds.type !== "bar") return;
+          chart.getDatasetMeta(k).data.forEach(function (bar, i) {
+            if (!partial(i)) return;
+            var p = bar.getProps(["x", "y", "base", "width"]), left = p.x - p.width / 2;
+            if (Math.abs(p.base - p.y) < 1) return;
+            ctx.save();
+            ctx.strokeStyle = ds.seriesColor; ctx.lineWidth = 2; ctx.setLineDash([2, 3]); ctx.lineCap = "round";
+            ctx.strokeRect(left + 1, Math.min(p.y, p.base) + 1, p.width - 2, Math.abs(p.base - p.y) - 1);
+            ctx.restore();
+          });
+        });
+      }
+    };
+    return R.chart(id, {
+      type: "bar",
+      data: { labels: ax ? ax.labels : cfg.labels, datasets: bars.concat(lines) },
+      options: R.metricsOptions({
+        layout: { padding: { top: 8, right: 10, left: 2, bottom: 2 } },
+        scales: {
+          x: ax ? ax.scale({ offset: true, border: { color: "#d9d9d2" } })
+                : { offset: true, border: { color: "#d9d9d2" }, grid: { display: false, drawTicks: false },
+                    ticks: { color: "#000", font: { size: 14 }, padding: 8 } },
+          y: yt.scale({ min: y.min == null ? 0 : y.min, max: y.max,
+                        ticks: { stepSize: y.step, color: "#777",
+                                 callback: y.format || function (v) { return v.toLocaleString(); } } })
+        }
+      }),
+      plugins: [yt.plugin, outline].concat(ax ? [ax.plugin] : [])
+    });
+  };
+
+  // ---------------------------------------------------------------- scorecard + chart: the line chart
+  // One call that builds the chart half of the scorecard_chart_box macro: lines by period with no
+  // gridlines, y-axis tick marks, a bracket under each period when the periods carry info lines (with the
+  // info above it and small notes below it; without info lines plain labels, see Report.periodAxis), and a
+  // dotted segment into any in-progress period.
+  //   Report.scorecardChart("c1", {
+  //     points: [{ label: "FY26", info: ["Active During Period", "7,017"] },
+  //              { label: "FY27", info: ["Active During Period", "6,321"], below: ["Q1 only"] }],
+  //     series: [{ label: "Total", data: [9.5, 4.7], color: "#1d2330" }, ...],
+  //     partial: [false, true],                         // in-progress periods (dotted into them)
+  //     y: { max: 20, step: 5, format: v => v + "%" }   // min defaults to 0
+  //   });
+  R.scorecardChart = function (id, cfg) {
+    var pts = cfg.points, y = cfg.y || {};
+    var yt = R.yTicks(cfg.ticks || {});
+    var ax = R.periodAxis(pts, { colors: cfg.colors });       // brackets only when periods carry info lines
+    return R.chart(id, {
+      type: "line",
+      data: {
+        labels: ax.labels,
+        datasets: cfg.series.map(function (s) {
+          return R.lineDataset({ label: s.label, data: s.data, color: s.color, partial: cfg.partial || [] });
+        })
+      },
+      options: R.metricsOptions({
+        layout: { padding: { top: 8, right: 10, left: 2, bottom: 2 } },
+        scales: {
+          x: ax.scale({ offset: true, border: { color: "#d9d9d2" } }),
+          y: yt.scale({
+            min: y.min == null ? 0 : y.min, max: y.max,
+            ticks: { stepSize: y.step, color: "#777", callback: y.format || function (v) { return v + "%"; } }
+          })
+        }
+      }),
+      plugins: [ax.plugin, yt.plugin]
+    });
+  };
+
+  // ---------------------------------------------------------------- labels above bars
+  // Draws text above selected bars. text(i, value) returns a string, or null/"" to skip that bar.
+  R.barLabels = function (o) {
+    var di = o.datasetIndex || 0, offset = o.offset == null ? 5 : o.offset;
+    return {
+      id: "reportBarLabels_" + di,
+      afterDatasetsDraw: function (chart) {
+        if (!chart.isDatasetVisible(di)) return;
+        var ctx = chart.ctx, ds = chart.data.datasets[di];
+        ctx.save();
+        ctx.font = (o.font || "12px ") + (o.font ? "" : family());
+        ctx.fillStyle = o.color || "#000"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+        chart.getDatasetMeta(di).data.forEach(function (bar, i) {
+          var t = o.text(i, ds.data[i]);
+          if (t) ctx.fillText(t, bar.x, bar.y - offset);
+        });
+        ctx.restore();
+      }
+    };
+  };
+})();
+</script>
+{% endraw %}

@@ -1,0 +1,12 @@
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.tmdl text
+*.json text
+*.ipynb text eol=lf
+
+# Binary files: Git can't diff these meaningfully
+*.xlsx binary
+*.xls binary
+*.xlsm binary
+*.pbix binary

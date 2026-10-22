@@ -1,0 +1,232 @@
+{# MANAGED by the html-report skill (refreshed by init_reports.py --upgrade). Don't edit; extend it. #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>{{ title }}</title>
+<meta name="generated" content="{{ generated_on }}">
+<style>
+:root {
+  --bg: #f6f7f9; --surface: #ffffff; --text: #1d2330; --muted: #5d6676;
+  --border: #dde1e8; --accent: #0072B2; --grid: rgba(0,0,0,.08);
+  --good: #008749; --bad: #b3261e;   /* favourable / unfavourable indicators */
+  --radius: 10px; --gap: 16px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12151c; --surface: #1b202b; --text: #e8ebf1; --muted: #98a2b3;
+    --border: #2b3242; --accent: #56B4E9; --grid: rgba(255,255,255,.1);
+    --good: #4cc38a; --bad: #ff8a80;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); line-height: 1.45; }
+.page { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+.report-header { margin-bottom: 20px; }
+.report-header:empty { display: none; }
+.report-header h1 { margin: 0 0 4px; font-size: 1.6rem; }
+.meta { color: var(--muted); font-size: .85rem; }
+.grid { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); margin-bottom: var(--gap); }
+.grid.kpis { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; min-width: 0; }
+.card.wide { grid-column: 1 / -1; }
+.card h2 { margin: 0 0 2px; font-size: 1rem; }
+.sub { margin: 0 0 10px; color: var(--muted); font-size: .85rem; }
+.chart-wrap { position: relative; width: 100%; }
+.kpi-label { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
+.kpi-value { font-size: 1.8rem; font-weight: 650; margin: 2px 0; }
+.kpi-note { color: var(--muted); font-size: .8rem; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--surface); cursor: pointer; user-select: none; }
+th[aria-sort="ascending"]::after { content: " \25B2"; font-size: .7em; }
+th[aria-sort="descending"]::after { content: " \25BC"; font-size: .7em; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.report-footer { margin-top: 24px; color: var(--muted); font-size: .8rem; }
+.mchart { width: 100%; max-width: 1080px; }
+.mchart-title { margin: 0 0 8px; padding: 0 6px; font-size: 17px; font-weight: 600; line-height: 1.3; color: var(--text); }
+.mchart-title span { font-weight: 400; font-size: 14px; color: var(--muted); }
+.mchart-legend { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 0 6px; margin-bottom: 8px; font-size: 13px; color: var(--text); }
+.mchart-item { display: flex; gap: 8px; align-items: center; }
+.mchart-sw { flex: none; width: 14px; height: 12px; }
+.mchart-sw.dash { height: 3px; }
+.mchart-sw.square { width: 10px; height: 10px; }
+.mchart-legend-title { font-weight: 600; }
+.mchart-plot { position: relative; width: 100%; height: var(--mchart-h, 540px); }
+.mchart-note { margin: 8px 0 0; padding: 0 6px; font-size: 12px; color: var(--muted); }
+@media (max-width: 800px) { .mchart-plot { height: min(var(--mchart-h, 540px), 460px); } }
+.sbox { width: 100%; max-width: 1080px; container-type: inline-size; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 22px 24px 20px; }
+.sbox-title { margin: 0 0 16px; font-size: 20px; font-weight: 700; line-height: 1.25; color: var(--text); }
+.sbox-inner { display: grid; grid-template-columns: minmax(0, 520px) minmax(260px, 420px); column-gap: 28px; align-items: start; }
+.sbox-inner.no-panel { grid-template-columns: minmax(0, 520px); }
+.sbox-inner > * { min-width: 0; }
+.sbox-score { grid-column: 1; grid-row: 1; }
+.sbox-chart { grid-column: 1; grid-row: 2; margin-top: 20px; }
+.sbox-sub { margin: 0 0 8px; padding: 0 6px; font-size: 14px; color: var(--muted); }
+.sbox-plot { position: relative; width: 100%; height: var(--sbox-h, 320px); }
+.sbox-more { margin-top: 28px; }
+.sbox-more-title { margin: 0 0 4px; padding: 0 6px; font-size: 16px; font-weight: 600; color: var(--text); }
+/* the text panel sits to the right, level with the first scorecard row */
+.sbox-panel { grid-column: 2; grid-row: 1 / span 2; margin-top: 12px; padding: 14px 16px; background: var(--bg); border-radius: 8px; font-size: 13px; line-height: 1.5; color: var(--text); }
+.sbox-panel p { margin: 0; }
+.sbox-panel p + p { margin-top: 8px; }
+.sbox-panel .head { margin-top: 14px; font-weight: 700; }
+.sbox-panel > :first-child { margin-top: 0; }
+.sbox-panel .field { text-decoration: underline; }
+@container (max-width: 860px) {
+  .sbox-inner { grid-template-columns: minmax(0, 1fr); }
+  .sbox-panel { grid-column: 1; grid-row: 3; margin-top: 20px; }
+}
+.sc { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.sc th, .sc td { padding: 0 14px; text-align: left; vertical-align: top; border: 0; white-space: normal; position: static; cursor: default; background: none; }
+.sc th { padding-top: 12px; font-size: 18px; font-weight: 600; line-height: 1.2; color: var(--text); }
+.sc th small { margin-left: 4px; font-size: 11px; font-weight: 400; color: var(--muted); }
+.sc th small.below { display: block; margin: 2px 0 0; }
+.sc td { padding-top: 0; padding-bottom: 2px; }
+.sc th:first-child, .sc td:first-child { padding-left: 0; }
+.sc th + th, .sc td + td { border-left: 1px solid var(--border); }
+.sc-pct { display: flex; align-items: center; gap: 6px; margin-top: 1px; font-size: 28px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.15; color: var(--text); }
+.sc-pct.good { color: var(--good); }
+.sc-pct.bad { color: var(--bad); }
+.sc-pct.flat { color: var(--muted); }
+.sc-arrow { width: 22px; height: 18px; flex: none; }
+.sc-count { margin-top: 2px; font-size: 13px; color: var(--muted); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media print {
+  :root { --bg: #fff; --surface: #fff; --text: #000; --muted: #444; --border: #bbb; }
+  body { background: #fff; }
+  .page { max-width: none; padding: 0; }
+  .card { break-inside: avoid; }
+  .no-print { display: none !important; }
+}
+{% block styles %}{% endblock %}
+</style>
+{% block head_extra %}{% endblock %}
+</head>
+<body>
+<div class="page">
+  {# No page title or date by default: each box carries its own title, and the build time is in the
+     "generated" meta tag. Override `header` to add a page heading (for example <h1>{{ title }}</h1>). #}
+  <header class="report-header">{% block header %}{% endblock %}</header>
+  <main>
+  {% block content %}{% endblock %}
+  </main>
+  <footer class="report-footer">{% block footer %}{% endblock %}</footer>
+</div>
+
+<script>{{ chartjs }}</script>
+<script id="report-data" type="application/json">{{ data | tojson }}</script>
+<script>
+(function () {
+  "use strict";
+  var data = JSON.parse(document.getElementById("report-data").textContent);
+  // Colour-blind-friendly palette (Okabe-Ito, with a neutral grey in place of black)
+  var palette = ["#0072B2", "#E69F00", "#009E73", "#D55E00", "#CC79A7", "#56B4E9", "#F0E442", "#999999"];
+  var PIE_TYPES = { pie: 1, doughnut: 1, polarArea: 1 };
+
+  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function color(i) { return palette[i % palette.length]; }
+
+  function applyChartDefaults() {
+    Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+    Chart.defaults.color = cssVar("--muted");
+    Chart.defaults.borderColor = cssVar("--grid");
+    Chart.defaults.responsive = true;
+    Chart.defaults.maintainAspectRatio = false;
+  }
+  applyChartDefaults();
+  if (window.matchMedia) {
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () {
+      applyChartDefaults();
+      Object.keys(Chart.instances).forEach(function (k) { Chart.instances[k].update(); });
+    });
+  }
+
+  // Create a chart on <canvas id=...>. Datasets without colours get palette colours.
+  function chart(id, config) {
+    var canvas = document.getElementById(id);
+    if (!canvas) throw new Error("No canvas with id '" + id + "'");
+    var isPie = !!PIE_TYPES[config.type];
+    (config.data.datasets || []).forEach(function (ds, i) {
+      if (isPie) {
+        if (!ds.backgroundColor) {
+          ds.backgroundColor = (config.data.labels || []).map(function (_, j) { return color(j); });
+        }
+      } else {
+        if (!ds.borderColor) ds.borderColor = color(i);
+        if (!ds.backgroundColor) ds.backgroundColor = (config.type === "line" ? color(i) + "33" : color(i));
+      }
+    });
+    return new Chart(canvas, config);
+  }
+
+  // Fill <table id=...>. columns: [{key, label, num?: bool, format?: fn}], rows: [{...}].
+  // Uses textContent only (never innerHTML), so data can't inject markup.
+  function table(id, columns, rows, opts) {
+    opts = opts || {};
+    var sortable = opts.sortable !== false;
+    var el = document.getElementById(id);
+    if (!el) throw new Error("No table with id '" + id + "'");
+    var state = { key: null, dir: 1 };
+
+    function fmt(col, v) {
+      if (v === null || v === undefined) return "";
+      if (col.format) return col.format(v);
+      return typeof v === "number" ? v.toLocaleString() : String(v);
+    }
+    function render() {
+      var sorted = rows.slice();
+      if (state.key !== null) {
+        sorted.sort(function (a, b) {
+          var x = a[state.key], y = b[state.key];
+          if (x === y) return 0;
+          if (x === null || x === undefined) return 1;
+          if (y === null || y === undefined) return -1;
+          if (typeof x === "number" && typeof y === "number") return (x - y) * state.dir;
+          return String(x).localeCompare(String(y), undefined, { numeric: true }) * state.dir;
+        });
+      }
+      el.textContent = "";
+      var thead = el.createTHead().insertRow();
+      columns.forEach(function (col) {
+        var th = document.createElement("th");
+        th.scope = "col";
+        th.textContent = col.label;
+        if (col.num) th.className = "num";
+        if (sortable) {
+          th.tabIndex = 0;
+          th.setAttribute("aria-sort", state.key === col.key ? (state.dir === 1 ? "ascending" : "descending") : "none");
+          var go = function () {
+            state.dir = state.key === col.key ? -state.dir : 1;
+            state.key = col.key;
+            render();
+          };
+          th.addEventListener("click", go);
+          th.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+        }
+        thead.appendChild(th);
+      });
+      var tbody = el.createTBody();
+      sorted.forEach(function (row) {
+        var tr = tbody.insertRow();
+        columns.forEach(function (col) {
+          var td = tr.insertCell();
+          td.textContent = fmt(col, row[col.key]);
+          if (col.num) td.className = "num";
+        });
+      });
+    }
+    render();
+  }
+
+  window.Report = { data: data, palette: palette, color: color, chart: chart, table: table };
+})();
+</script>
+{% include "_chart_helpers.html" %}
+{% block scripts %}{% endblock %}
+</body>
+</html>

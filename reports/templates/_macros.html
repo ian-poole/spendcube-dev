@@ -1,0 +1,175 @@
+{# MANAGED by the html-report skill (refreshed by init_reports.py --upgrade). Import with:
+   {% import "_macros.html" as ui %}  #}
+
+{# A card holding one chart. Draw it from JS with Report.chart("<id>", {...}). #}
+{% macro chart_card(id, title, subtitle="", height=320, wide=false) %}
+<section class="card{{ ' wide' if wide }}">
+  <h2>{{ title }}</h2>
+  {% if subtitle %}<p class="sub">{{ subtitle }}</p>{% endif %}
+  <div class="chart-wrap" style="height: {{ height }}px">
+    <canvas id="{{ id }}" role="img" aria-label="{{ title }}{% if subtitle %}. {{ subtitle }}{% endif %}"></canvas>
+  </div>
+</section>
+{% endmacro %}
+
+{# A single headline number. Pass `value` already formatted. Wrap several in <div class="grid kpis">. #}
+{% macro kpi_card(label, value, note="") %}
+<div class="card">
+  <div class="kpi-label">{{ label }}</div>
+  <div class="kpi-value">{{ value }}</div>
+  {% if note %}<div class="kpi-note">{{ note }}</div>{% endif %}
+</div>
+{% endmacro %}
+
+{# A card holding a sortable table. Fill it from JS with Report.table("<id>", columns, rows). #}
+{% macro table_card(id, title, subtitle="") %}
+<section class="card wide">
+  <h2>{{ title }}</h2>
+  {% if subtitle %}<p class="sub">{{ subtitle }}</p>{% endif %}
+  <div class="table-wrap"><table id="{{ id }}"></table></div>
+</section>
+{% endmacro %}
+
+{# The legend row: an optional bold title first (for example "Action Category"), then swatch + name per item.
+   legend: list of {label, color, shape} where shape is "bar", "square" (small, for column series) or "dash". #}
+{% macro _legend(legend, legend_title="", default_shape="bar") %}
+{% if legend %}
+<div class="mchart-legend">
+  {% if legend_title %}<span class="mchart-item mchart-legend-title">{{ legend_title }}</span>{% endif %}
+  {% for item in legend %}<span class="mchart-item"><span class="mchart-sw {{ item.shape | default(default_shape) }}" style="background: {{ item.color }}"></span><span>{{ item.label }}</span></span>{% endfor %}
+</div>
+{% endif %}
+{% endmacro %}
+
+{# A chart laid out for the Metrics view: title (optional lighter qualifier in brackets), a horizontal
+   legend of swatch + name (optionally led by legend_title), the plot, then notes (put the scope/filter
+   note here). legend: list of {label, color, shape} where shape is "bar" (default), "square" or "dash".
+   Draw it from JS with Report.chart("<id>", {... options: Report.metricsOptions({...}) }). #}
+{% macro metrics_chart(id, title, qualifier="", legend=[], notes=[], height=540, legend_title="") %}
+<section class="mchart">
+  <h2 class="mchart-title">{{ title }}{% if qualifier %} <span>({{ qualifier }})</span>{% endif %}</h2>
+  {{ _legend(legend, legend_title, "bar") }}
+  <div class="mchart-plot" style="--mchart-h: {{ height }}px">
+    <canvas id="{{ id }}" role="img" aria-label="{{ title }}{% if qualifier %} ({{ qualifier }}){% endif %}"></canvas>
+  </div>
+  {% for note in notes %}
+  <p class="mchart-note">{{ note }}</p>
+  {% endfor %}
+</section>
+{% endmacro %}
+
+{# ---- Scorecard + chart box -------------------------------------------------------------------
+   Placeholder text for the explanation (use only when the user asked for placeholder text):
+   {{ ui.scorecard_chart_box(..., explanation=ui.lorem_ipsum) }} #}
+{% set lorem_ipsum = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat." %}
+
+{# A row of period values with a colored better/worse indicator on one of them, optional estimated columns
+   for partial periods, and an optional target at the end.
+   periods: list of {label, value, count?, note?, tracked?, of?, estimate_note?, estimate_value?}.
+   note: small text beside the period label, or under it with note_below=true.
+   Indicator: by default on the last period, compared with the period just before it; `compare` names
+     another period to carry it (for example the last full period when the latest one is partial). Values
+     are compared as displayed (rounded to `decimals`). good_direction is REQUIRED and must be "lower" or
+     "higher": it decides whether a change is colored good (green) or bad (red). Never assume it; ask.
+   Estimates: with estimate=true, a period that is only partly tracked (`tracked` of `of` sub-periods, e.g.
+     1 of 4 quarters) gets an estimated column right after it. estimate_method:
+       "gross" (default): what is tracked so far plus its average per tracked sub-period for each one left,
+                          value + value / tracked x (of - tracked) (Q1 x 4, Q1-Q2 x 2, Q1-Q3 + a third)
+       "given":           the period's own estimate_value, worked out upstream by whatever method was agreed
+     Its heading is estimate_label and its small note estimate_note (or the period's own estimate_note; ""
+     for none); both may use {label}, {tracked}, {of} and {factor}. Estimates never carry the indicator.
+   target: {label, value}. count_label is the word after each small count (for example "terms"). #}
+{% macro _est_text(text, p) %}{% set f = p.of / p.tracked %}{{ text | replace("{label}", p.label) | replace("{tracked}", p.tracked | string) | replace("{of}", p.of | string) | replace("{factor}", ((f | int) if f == (f | int) else (f | round(2))) | string) }}{% endmacro %}
+{% macro scorecard(periods, good_direction, target=none, count_label="", decimals=0, unit="%", compare=none,
+                   estimate=false, estimate_label="Est. {label}", estimate_note="projected",
+                   estimate_method="gross", note_below=false) %}
+{% if good_direction not in ["lower", "higher"] %}{{ scorecard_good_direction_must_be_lower_or_higher }}{% endif %}
+{% if estimate and estimate_method not in ["gross", "given"] %}{{ scorecard_estimate_method_must_be_gross_or_given }}{% endif %}
+{% set fmt = "%." ~ decimals ~ "f" %}
+{% set shown = periods | map(attribute="value") | map("round", decimals, "common") | list %}
+{% set s = namespace(i=(periods | length) - 1, dir="", tone="flat") %}
+{% if compare is not none %}
+  {% set s.i = -1 %}
+  {% for p in periods %}{% if p.label == compare %}{% set s.i = loop.index0 %}{% endif %}{% endfor %}
+  {% if s.i < 1 %}{{ scorecard_compare_must_name_a_period_that_has_one_before_it }}{% endif %}
+{% endif %}
+{% if s.i >= 1 %}
+  {% if shown[s.i] > shown[s.i - 1] %}{% set s.dir = "up" %}{% elif shown[s.i] < shown[s.i - 1] %}{% set s.dir = "down" %}{% else %}{% set s.dir = "flat" %}{% endif %}
+  {% if s.dir != "flat" %}{% set s.tone = "good" if ((s.dir == "down") == (good_direction == "lower")) else "bad" %}{% endif %}
+{% endif %}
+<table class="sc">
+  <thead><tr>
+    {% for p in periods %}<th scope="col">{{ p.label }}{% if p.note is defined and p.note %}<small{% if note_below %} class="below"{% endif %}>{{ p.note }}</small>{% endif %}</th>
+    {% if estimate and p.tracked is defined and p.of is defined and p.tracked < p.of %}{% set en = p.estimate_note if p.estimate_note is defined else estimate_note %}<th scope="col" class="sc-est">{{ _est_text(estimate_label, p) }}{% if en %}<small>{{ _est_text(en, p) }}</small>{% endif %}</th>{% endif %}
+    {% endfor %}
+    {% if target %}<th scope="col">{{ target.label }}</th>{% endif %}
+  </tr></thead>
+  <tbody><tr>
+    {% for p in periods %}
+    {% set marked = loop.index0 == s.i and s.dir %}
+    <td>
+      <div class="sc-pct{% if marked %} {{ s.tone }}{% endif %}">{{ fmt | format(shown[loop.index0]) }}{{ unit }}{% if marked %}
+        <svg class="sc-arrow" viewBox="0 0 24 20" role="img" aria-label="{{ {'up': 'higher than', 'down': 'lower than', 'flat': 'same as'}[s.dir] }} {{ periods[loop.index0 - 1].label }}"><path d="{{ {'up': 'M4 14 L12 6 L20 14', 'down': 'M4 6 L12 14 L20 6', 'flat': 'M5 10 H19'}[s.dir] }}" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>{% endif %}</div>
+      {% if p.count is defined and p.count is not none %}<div class="sc-count">{% if p.count is number %}{{ "{:,.0f}".format(p.count) }}{% else %}{{ p.count }}{% endif %}{% if count_label %} {{ count_label }}{% endif %}</div>{% endif %}
+    </td>
+    {% if estimate and p.tracked is defined and p.of is defined and p.tracked < p.of %}
+    {% if estimate_method == "given" and p.estimate_value is not defined %}{{ scorecard_given_estimate_needs_the_period_estimate_value }}{% endif %}
+    {% set ev = p.estimate_value if estimate_method == "given" else p.value + p.value / p.tracked * (p.of - p.tracked) %}
+    <td class="sc-est"><div class="sc-pct">{{ fmt | format(ev | round(decimals, "common")) }}{{ unit }}</div></td>
+    {% endif %}
+    {% endfor %}
+    {% if target %}<td><div class="sc-pct">{{ fmt | format(target.value | round(decimals, "common")) }}{{ unit }}</div></td>{% endif %}
+  </tr></tbody>
+</table>
+{% endmacro %}
+
+{# The text panel for the far right of the box. Each part is left out when empty: explanation (a string, or a
+   list of strings for several paragraphs),
+   updates (a string or a list of strings), definitions (a list of {field, text}; field names are underlined). #}
+{% macro side_panel(explanation=none, updates=none, definitions=[]) %}
+{% set ups = ([updates] if updates is string else updates) if updates else [] %}
+{% set exps = ([explanation] if explanation is string else explanation) if explanation else [] %}
+{% if exps or ups or definitions %}
+<aside class="sbox-panel">
+  {% for e in exps %}<p>{{ e }}</p>{% endfor %}
+  {% if ups %}<p class="head">Updates:</p>{% for u in ups %}<p>{{ u }}</p>{% endfor %}{% endif %}
+  {% if definitions %}<p class="head">Data Definitions:</p>{% for d in definitions %}<p><span class="field">{{ d.field }}:</span> {{ d.text }}</p>{% endfor %}{% endif %}
+</aside>
+{% endif %}
+{% endmacro %}
+
+{# The whole scorecard + chart design in one box: title; the scorecard above the chart; the subtitle, legend
+   and chart below it (more_charts: further charts under it in the same column, each {id, title, subtitle?,
+   legend?, legend_title?, height?, aria?}, drawn from JS on its id); the text panel on the far right, level
+   with the scorecard (it drops under the chart
+   when the box is narrow); and an optional note (for example a scope note) under the box. Draw the chart
+   from JS with Report.scorecardChart("<id>", {...}). See references/scorecard-chart-box.md. #}
+{% macro scorecard_chart_box(id, title, periods, good_direction, target=none, count_label="", decimals=0, unit="%",
+                             subtitle="", legend=[], explanation=none, updates=none, definitions=[], note="",
+                             height=320, aria="", compare=none, estimate=false, estimate_label="Est. {label}",
+                             estimate_note="projected", estimate_method="gross", note_below=false,
+                             legend_title="", more_charts=[]) %}
+{% set has_panel = explanation or updates or definitions %}
+<section class="sbox">
+  <h2 class="sbox-title">{{ title }}</h2>
+  <div class="sbox-inner{{ '' if has_panel else ' no-panel' }}">
+    <div class="sbox-score">{{ scorecard(periods, good_direction, target, count_label, decimals, unit, compare,
+                                         estimate, estimate_label, estimate_note, estimate_method, note_below) }}</div>
+    <div class="sbox-chart">
+      {% if subtitle %}<p class="sbox-sub">{{ subtitle }}</p>{% endif %}
+      {{ _legend(legend, legend_title, "dash") }}
+      <div class="sbox-plot" style="--sbox-h: {{ height }}px"><canvas id="{{ id }}" role="img" aria-label="{{ aria or title }}"></canvas></div>
+      {% for c in more_charts %}
+      <div class="sbox-more">
+        <h3 class="sbox-more-title">{{ c.title }}</h3>
+        {% if c.subtitle %}<p class="sbox-sub">{{ c.subtitle }}</p>{% endif %}
+        {{ _legend(c.legend | default([]), c.legend_title | default(""), "dash") }}
+        <div class="sbox-plot" style="--sbox-h: {{ c.height | default(260) }}px"><canvas id="{{ c.id }}" role="img" aria-label="{{ c.aria | default(c.title) }}"></canvas></div>
+      </div>
+      {% endfor %}
+    </div>
+    {{ side_panel(explanation, updates, definitions) }}
+  </div>
+</section>
+{% if note %}<p class="mchart-note">{{ note }}</p>{% endif %}
+{% endmacro %}

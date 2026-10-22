@@ -1,0 +1,3 @@
+# Dev standards this project follows. See C:\Users\<you>\dev\claude_config\CHANGELOG.md.
+# Update `standards` only after making the "Projects:" changes for each newer version.
+standards = "2026.10.1"

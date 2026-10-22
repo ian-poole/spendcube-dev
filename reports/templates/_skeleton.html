@@ -1,0 +1,15 @@
+{# New report. Build with:  python reports/build.py <name> [--data file.json]
+   Docs: reports/README.md #}
+{% extends "_base.html" %}
+{% import "_macros.html" as ui %}
+
+{% block content %}
+  {# Layout with the macros in _macros.html: ui.kpi_card, ui.chart_card, ui.table_card #}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Report.data holds the data passed to the build. Draw with Report.chart(id, config)
+  // and Report.table(id, columns, rows).
+</script>
+{% endblock %}

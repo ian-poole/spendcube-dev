@@ -1,0 +1,15 @@
+{
+  "version": "1.8.2",
+  "files": {
+    "build.py": "1136d8195aeb1bd0e21096388e5e2074ecca34db49d5aa142d582ef5a0ed8d0b",
+    "README.md": "46398d7724c468d1e3885396019181a7ca63c292b1bb218a7a8bfa2688fb734e",
+    "templates/_base.html": "a90baaa9ef0642d80531676ec123d5251974f7b14153594d9356d1bae46f4b22",
+    "templates/_chart_helpers.html": "5612cfeaaee2d562f9eedef211f2e084c96dc0a1b252d6f53f0e775a196a1a16",
+    "templates/_macros.html": "98c6e3c5462d285609b4d6ca5470564fec98fa133716ec6c1ce97018c385c889",
+    "templates/_skeleton.html": "3a1f736fbe18bdc5fe6fc4f1ff2b90257c63afbc524d7ff498a5b1eb304a495a",
+    "tests/test_build.py": "a480cb354bbc64463685cc7719e4c0fc0ee8aa820cc6f8ddaeb626a4e6f6735c",
+    "vendor/chart.umd.min.js": "48444a82d4edcb5bec0f1965faacdde18d9c17db3063d042abada2f705c9f54a",
+    "vendor/CHARTJS_LICENSE.md": "41a84aa2caba645f966a18d9c2056b73e6d3a81d80bc0046bc0011a2634d4cce",
+    "vendor/README.md": "55f43fdea96940789d06b2e3950b7554a6e11fe22605b9592496b0f5916e37ee"
+  }
+}

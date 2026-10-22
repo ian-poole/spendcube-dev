@@ -1,0 +1,43 @@
+# --- Data: folder structure is kept, contents are not. data/sample IS committed. ---
+data/*
+!data/raw/
+!data/interim/
+!data/processed/
+!data/sample/
+data/raw/*
+data/interim/*
+data/processed/*
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+
+# --- Outputs: generated reports and deliverables (may embed data). Commit one deliberately. ---
+outputs/*
+!outputs/.gitkeep
+
+# --- Excel temp/lock files ---
+~$*
+
+# --- Power BI (PBIP local/cache files; .pbix is binary, use .pbip) ---
+**/.pbi/localSettings.json
+**/.pbi/cache.abf
+*.pbix
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+build/
+dist/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
